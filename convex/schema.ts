@@ -36,10 +36,15 @@ export default defineSchema({
     storageId: v.optional(v.id("_storage")),
     isEdited: v.optional(v.boolean()),
 
-    // Нові поля для підтримки відповідей на повідомлення:
+    // Цитування повідомлень (з ДЗ 9)
     replyToId: v.optional(v.id("messages")),
     replyToSender: v.optional(v.string()),
     replyToText: v.optional(v.string()),
+
+    // 👈 Нові поля для голосових повідомлень:
+    audioUrl: v.optional(v.string()),
+    audioStorageId: v.optional(v.id("_storage")),
+    audioDuration: v.optional(v.number()), // тривалість у секундах
   }).index("by_chat_room", ["chatRoomId"]),
 
   typingIndicators: defineTable({
