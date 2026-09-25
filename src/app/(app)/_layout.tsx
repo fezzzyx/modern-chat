@@ -47,6 +47,13 @@ export default function AppLayout() {
           title: "Інформація про кімнату",
         }}
       />
+      <Stack.Screen
+  name="user/[id]"
+  options={{
+    title: "Профіль учасника",
+    headerBackTitle: "Назад",
+  }}
+/>
     </Stack>
   );
 }

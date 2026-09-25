@@ -1,3 +1,4 @@
+import React, { useState, useRef } from "react";
 import {
   View,
   Text,
@@ -10,29 +11,30 @@ import {
   Alert,
   Image,
 } from "react-native";
-import { useLocalSearchParams, Stack, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
-import { useState, useRef } from "react";
-import { Ionicons } from "@expo/vector-icons";
-import { COLORS } from "../../../constants/theme";
 import { Id } from "../../../convex/_generated/dataModel";
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import { File } from "expo-file-system";
+import { fetch } from "expo/fetch";
+import { COLORS } from "../../../constants/theme";
 import { ImageViewerModal } from "../../../components/ImageViewerModal";
 import { TypingDots } from "../../../components/TypingDots";
+import { SwipeableMessageItem, MessageItemData } from "../../../components/SwipeableMessageItem";
+import { ReplyPreviewBar, ReplyTarget } from "../../../components/ReplyPreviewBar";
 
 export default function ChatRoomScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const chatRoomId = id as Id<"chatRooms">;
   const router = useRouter();
 
-  // Дані з Convex
+  const chatRoomId = id as Id<"chatRooms">;
   const room = useQuery(api.rooms.getRoom, { roomId: chatRoomId });
   const messages = useQuery(api.messages.listMessages, { chatRoomId });
   const currentUser = useQuery(api.users.currentUser);
   const typingUsers = useQuery(api.typing.getTypingUsers, { chatRoomId });
 
-  // Мутації
   const sendMessage = useMutation(api.messages.sendMessage);
   const sendMediaMessage = useMutation(api.messages.sendMediaMessage);
   const generateUploadUrl = useMutation(api.messages.generateUploadUrl);
@@ -40,41 +42,63 @@ export default function ChatRoomScreen() {
   const deleteMessage = useMutation(api.messages.deleteMessage);
   const setTyping = useMutation(api.typing.setTyping);
 
-  // Локальний стан
   const [inputText, setInputText] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<Id<"messages"> | null>(null);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
-  const [editingMessageId, setEditingMessageId] = useState<Id<"messages"> | null>(null);
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
-  const lastTypingSentRef = useRef(0);
+  const lastTypingCallRef = useRef<number>(0);
 
-  // Обробка набору тексту з тротлінгом (1.5 с)
+  // Тротлінг індикатора набору тексту
   const handleTextChange = (text: string) => {
     setInputText(text);
 
     const now = Date.now();
-    if (now - lastTypingSentRef.current > 1500) {
-      lastTypingSentRef.current = now;
-      setTyping({ chatRoomId }).catch(() => {});
+    if (now - lastTypingCallRef.current > 1500) {
+      lastTypingCallRef.current = now;
+      setTyping({ chatRoomId }).catch(console.error);
     }
   };
 
-  // Вибір фото з медіатеки
+  // Вибір фото з галереї
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.8,
-    });
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Дозвіл потрібен", "Надайте доступ до медіатеки для надсилання фотографій.");
+        return;
+      }
 
-    if (!result.canceled && result.assets[0].uri) {
-      setSelectedImageUri(result.assets[0].uri);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]?.uri) {
+        setSelectedImageUri(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Помилка", "Не вдалося вибрати зображення");
     }
   };
 
-  // Відправка повідомлення або збереження редагування
+  // Початок відповіді на повідомлення
+  const handleStartReply = (msg: MessageItemData) => {
+    setReplyTarget({
+      messageId: msg._id,
+      senderName: msg.senderName,
+      text: msg.content || (msg.imageUrl ? "📷 Фотографія" : ""),
+    });
+    // Скасовуємо режим редагування, якщо він був відкритий
+    setEditingMessageId(null);
+  };
+
+  // Відправка повідомлення або збереження змін
   const handleSend = async () => {
     const text = inputText.trim();
     if ((!text && !selectedImageUri) || isSubmitting) return;
@@ -90,38 +114,45 @@ export default function ChatRoomScreen() {
         });
         setEditingMessageId(null);
       } else if (selectedImageUri) {
-        // Режим завантаження фото в Convex Storage
+        // Відправка фотографії у Convex Storage через expo-file-system та expo/fetch
         const uploadUrl = await generateUploadUrl();
-        const response = await fetch(selectedImageUri);
-        const blob = await response.blob();
+        const file = new File(selectedImageUri);
 
         const uploadResult = await fetch(uploadUrl, {
           method: "POST",
-          headers: { "Content-Type": blob.type || "image/jpeg" },
-          body: blob,
+          headers: { "Content-Type": "image/jpeg" },
+          body: file,
         });
+
+        if (!uploadResult.ok) throw new Error("Не вдалося завантажити зображення");
 
         const { storageId } = await uploadResult.json();
 
         await sendMediaMessage({
           chatRoomId,
           storageId,
-          content: text || undefined,
+          caption: text || undefined,
+          replyToId: replyTarget ? (replyTarget.messageId as Id<"messages">) : undefined,
+          replyToSender: replyTarget?.senderName,
+          replyToText: replyTarget?.text,
         });
 
         setSelectedImageUri(null);
+        setReplyTarget(null);
       } else {
-        // Звичайна відправка тексту
+        // Відправка звичайного тексту з відповіддю (якщо задано)
         await sendMessage({
           chatRoomId,
           content: text,
+          replyToId: replyTarget ? (replyTarget.messageId as Id<"messages">) : undefined,
+          replyToSender: replyTarget?.senderName,
+          replyToText: replyTarget?.text,
         });
+
+        setReplyTarget(null);
       }
 
       setInputText("");
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
     } catch (error) {
       console.error(error);
       Alert.alert("Помилка", "Не вдалося надіслати повідомлення");
@@ -130,40 +161,44 @@ export default function ChatRoomScreen() {
     }
   };
 
-  // Меню дій над повідомленням (тільки для власних)
-  const handleMessageLongPress = (item: {
-    _id: Id<"messages">;
-    senderId: Id<"users">;
-    content?: string;
-  }) => {
-    if (item.senderId !== currentUser?._id) return;
+  // Контекстне меню дій з повідомленням
+  const handleMessageLongPress = (item: MessageItemData) => {
+    const isOwn = item.senderId === currentUser?._id;
 
-    const options: any[] = [];
+    const options: any[] = [
+      {
+        text: "Відповісти",
+        onPress: () => handleStartReply(item),
+      },
+    ];
 
-    if (item.content) {
+    if (isOwn) {
+      if (item.content) {
+        options.push({
+          text: "Редагувати",
+          onPress: () => {
+            setEditingMessageId(item._id);
+            setInputText(item.content || "");
+            setReplyTarget(null);
+          },
+        });
+      }
+
       options.push({
-        text: "Редагувати",
+        text: "Видалити",
+        style: "destructive",
         onPress: () => {
-          setEditingMessageId(item._id);
-          setInputText(item.content || "");
+          Alert.alert("Видалити повідомлення?", "Ви впевнені, що хочете видалити повідомлення?", [
+            { text: "Скасувати", style: "cancel" },
+            {
+              text: "Так, видалити",
+              style: "destructive",
+              onPress: () => deleteMessage({ messageId: item._id }),
+            },
+          ]);
         },
       });
     }
-
-    options.push({
-      text: "Видалити",
-      style: "destructive",
-      onPress: () => {
-        Alert.alert("Видалити повідомлення", "Ви впевнені, що хочете видалити повідомлення?", [
-          { text: "Скасувати", style: "cancel" },
-          {
-            text: "Так, видалити",
-            style: "destructive",
-            onPress: () => deleteMessage({ messageId: item._id }),
-          },
-        ]);
-      },
-    });
 
     options.push({ text: "Скасувати", style: "cancel" });
 
@@ -195,71 +230,32 @@ export default function ChatRoomScreen() {
         ref={flatListRef}
         data={messages}
         keyExtractor={(item) => item._id}
-        contentContainerStyle={{ padding: 16, gap: 12 }}
+        contentContainerStyle={{ padding: 16 }}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-        renderItem={({ item }) => {
-          const isOwn = item.senderId === currentUser?._id;
-
-          return (
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onLongPress={() => handleMessageLongPress(item)}
-              className={`flex-row ${isOwn ? "justify-end" : "justify-start"}`}
-            >
-              <View
-                className={`max-w-[80%] rounded-2xl p-3 ${
-                  isOwn ? "bg-primary rounded-br-xs" : "bg-secondary rounded-bl-xs"
-                }`}
-              >
-                {!isOwn && (
-                  <Text className="text-textMuted text-xs font-semibold mb-1">
-                    {item.senderName}
-                  </Text>
-                )}
-
-                {/* Фотографія (якщо надіслана) */}
-                {item.imageUrl && (
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => setFullscreenImage(item.imageUrl!)}
-                  >
-                    <Image
-                      source={{ uri: item.imageUrl }}
-                      className="w-56 h-56 rounded-xl mb-1 bg-surface"
-                      resizeMode="cover"
-                    />
-                  </TouchableOpacity>
-                )}
-
-                {/* Текст повідомлення */}
-                {item.content ? (
-                  <Text className="text-white text-base leading-5">{item.content}</Text>
-                ) : null}
-
-                {/* Час та позначка (ред.) */}
-                <View className="flex-row items-center justify-end mt-1 gap-1">
-                  {item.isEdited && (
-                    <Text className="text-white/60 text-[10px] italic">(ред.)</Text>
-                  )}
-                  <Text className="text-white/60 text-[10px]">
-                    {new Date(item._creationTime).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        }}
+        renderItem={({ item }) => (
+          <SwipeableMessageItem
+            item={item as MessageItemData}
+            isOwn={item.senderId === currentUser?._id}
+            onLongPress={() => handleMessageLongPress(item as MessageItemData)}
+            onReply={handleStartReply}
+            onImagePress={(url) => setFullscreenImage(url)}
+            onAuthorPress={(authorId) => router.push(`/user/${authorId}`)}
+          />
+        )}
       />
 
-      {/* Індикатор набору тексту іншими користувачами */}
-      {typingUsers && typingUsers.length > 0 && (
-        <TypingDots typingUsers={typingUsers} />
+      {/* Індикатор набору тексту іншими учасниками */}
+      {typingUsers && typingUsers.length > 0 && <TypingDots typingUsers={typingUsers} />}
+
+      {/* Панель активного цитування (Reply Bar) */}
+      {replyTarget && (
+        <ReplyPreviewBar
+          replyTarget={replyTarget}
+          onCancel={() => setReplyTarget(null)}
+        />
       )}
 
-      {/* Панель активного редагування повідомлення */}
+      {/* Панель активного редагування власного повідомлення */}
       {editingMessageId && (
         <View className="flex-row items-center justify-between px-4 py-2 bg-surfaceLight border-t border-surface">
           <View className="flex-row items-center flex-1 mr-2">
@@ -288,7 +284,7 @@ export default function ChatRoomScreen() {
         </View>
       )}
 
-      {/* Панель введення */}
+      {/* Панель введення тексту */}
       <View className="flex-row items-center p-3 bg-surface border-t border-surfaceLight">
         <TouchableOpacity
           onPress={pickImage}
@@ -303,6 +299,8 @@ export default function ChatRoomScreen() {
           placeholder={
             editingMessageId
               ? "Змініть текст..."
+              : replyTarget
+              ? `Відповідь для ${replyTarget.senderName}...`
               : selectedImageUri
               ? "Додайте підпис до фото..."
               : "Напишіть повідомлення..."
@@ -334,7 +332,7 @@ export default function ChatRoomScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Модальне вікно для повноекранного перегляду зображення */}
+      {/* Модальне вікно перегляду зображення */}
       <ImageViewerModal
         visible={!!fullscreenImage}
         imageUrl={fullscreenImage}
