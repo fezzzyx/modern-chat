@@ -6,6 +6,7 @@ import { ConvexReactClient } from "convex/react";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
   unsavedChangesWarning: false,
@@ -19,17 +20,19 @@ const secureStorage = {
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <ConvexAuthProvider
-        client={convex}
-        storage={
-          Platform.OS === "android" || Platform.OS === "ios"
-            ? secureStorage
-            : undefined
-        }
-      >
-        <InitialLayout />
-      </ConvexAuthProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ConvexAuthProvider
+          client={convex}
+          storage={
+            Platform.OS === "android" || Platform.OS === "ios"
+              ? secureStorage
+              : undefined
+          }
+        >
+          <InitialLayout />
+        </ConvexAuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
