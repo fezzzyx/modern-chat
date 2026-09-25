@@ -1,18 +1,35 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import "../../global.css";
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import InitialLayout from "../../components/InitialLayout";
+import { ConvexAuthProvider } from "@convex-dev/auth/react";
+import { ConvexReactClient } from "convex/react";
+import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
-SplashScreen.preventAutoHideAsync();
+const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
+  unsavedChangesWarning: false,
+});
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+const secureStorage = {
+  getItem: SecureStore.getItemAsync,
+  setItem: SecureStore.setItemAsync,
+  removeItem: SecureStore.deleteItemAsync,
+};
+
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ConvexAuthProvider
+        client={convex}
+        storage={
+          Platform.OS === "android" || Platform.OS === "ios"
+            ? secureStorage
+            : undefined
+        }
+      >
+        <InitialLayout />
+      </ConvexAuthProvider>
+    </SafeAreaProvider>
   );
 }
