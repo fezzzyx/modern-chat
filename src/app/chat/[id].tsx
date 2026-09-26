@@ -100,66 +100,89 @@ export default function ChatRoomScreen() {
 
   // Відправка повідомлення або збереження змін
   const handleSend = async () => {
-    const text = inputText.trim();
-    if ((!text && !selectedImageUri) || isSubmitting) return;
+  const text = inputText.trim();
 
-    try {
-      setIsSubmitting(true);
+  if ((!text && !selectedImageUri) || isSubmitting) {
+    return;
+  }
 
-      if (editingMessageId) {
-        // Режим збереження редагування
-        await editMessage({
-          messageId: editingMessageId,
-          content: text,
-        });
-        setEditingMessageId(null);
-      } else if (selectedImageUri) {
-        // Відправка фотографії у Convex Storage через expo-file-system та expo/fetch
-        const uploadUrl = await generateUploadUrl();
-        const file = new File(selectedImageUri);
+  try {
+    setIsSubmitting(true);
 
-        const uploadResult = await fetch(uploadUrl, {
-          method: "POST",
-          headers: { "Content-Type": "image/jpeg" },
-          body: file,
-        });
+    if (editingMessageId) {
+      // Редагування повідомлення
+      await editMessage({
+        messageId: editingMessageId,
+        content: text,
+      });
 
-        if (!uploadResult.ok) throw new Error("Не вдалося завантажити зображення");
+      setEditingMessageId(null);
+    } else if (selectedImageUri) {
+      // Завантаження зображення в Convex Storage
+      const uploadUrl = await generateUploadUrl();
 
-        const { storageId } = await uploadResult.json();
+      const fileResponse = await globalThis.fetch(selectedImageUri);
 
-        await sendMediaMessage({
-          chatRoomId,
-          storageId,
-          caption: text || undefined,
-          replyToId: replyTarget ? (replyTarget.messageId as Id<"messages">) : undefined,
-          replyToSender: replyTarget?.senderName,
-          replyToText: replyTarget?.text,
-        });
-
-        setSelectedImageUri(null);
-        setReplyTarget(null);
-      } else {
-        // Відправка звичайного тексту з відповіддю (якщо задано)
-        await sendMessage({
-          chatRoomId,
-          content: text,
-          replyToId: replyTarget ? (replyTarget.messageId as Id<"messages">) : undefined,
-          replyToSender: replyTarget?.senderName,
-          replyToText: replyTarget?.text,
-        });
-
-        setReplyTarget(null);
+      if (!fileResponse.ok) {
+        throw new Error("Не вдалося прочитати вибране зображення");
       }
 
-      setInputText("");
-    } catch (error) {
-      console.error(error);
-      Alert.alert("Помилка", "Не вдалося надіслати повідомлення");
-    } finally {
-      setIsSubmitting(false);
+      const blob = await fileResponse.blob();
+
+      const uploadResult = await globalThis.fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": blob.type || "image/jpeg",
+        },
+        body: blob,
+      });
+
+      if (!uploadResult.ok) {
+        throw new Error("Не вдалося завантажити зображення");
+      }
+
+      const { storageId } = await uploadResult.json();
+
+      await sendMediaMessage({
+        chatRoomId,
+        storageId,
+        caption: text || undefined,
+        replyToId: replyTarget
+          ? (replyTarget.messageId as Id<"messages">)
+          : undefined,
+        replyToSender: replyTarget?.senderName,
+        replyToText: replyTarget?.text,
+      });
+
+      setSelectedImageUri(null);
+      setReplyTarget(null);
+    } else {
+      // Звичайне текстове повідомлення
+      await sendMessage({
+        chatRoomId,
+        content: text,
+        replyToId: replyTarget
+          ? (replyTarget.messageId as Id<"messages">)
+          : undefined,
+        replyToSender: replyTarget?.senderName,
+        replyToText: replyTarget?.text,
+      });
+
+      setReplyTarget(null);
     }
-  };
+
+    setInputText("");
+  } catch (error) {
+    console.error("handleSend error:", error);
+
+    Alert.alert(
+      "Помилка",
+      "Не вдалося надіслати повідомлення"
+    );
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   // Контекстне меню дій з повідомленням
   const handleMessageLongPress = (item: MessageItemData) => {

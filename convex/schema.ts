@@ -26,33 +26,44 @@ export default defineSchema({
   }).index("by_creator", ["creatorId"]),
 
   // Повідомлення в кімнатах
-  messages: defineTable({
+    messages: defineTable({
     chatRoomId: v.id("chatRooms"),
     senderId: v.id("users"),
-    senderName: v.string(),
-    senderPhoto: v.optional(v.string()),
+    text: v.optional(v.string()),
     content: v.optional(v.string()),
+    senderName: v.optional(v.string()),
+    senderPhoto: v.optional(v.string()),
+
     imageUrl: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
+
+    audioUrl: v.optional(v.string()),
+    audioStorageId: v.optional(v.id("_storage")),
+    audioDuration: v.optional(v.number()),
+
+    videoUrl: v.optional(v.string()),
+    videoStorageId: v.optional(v.id("_storage")),
+    videoDuration: v.optional(v.number()),
+    isVideoNote: v.optional(v.boolean()),
+
     isEdited: v.optional(v.boolean()),
 
-    // Цитування повідомлень (з ДЗ 9)
     replyToId: v.optional(v.id("messages")),
     replyToSender: v.optional(v.string()),
     replyToText: v.optional(v.string()),
 
-    // 👈 Нові поля для голосових повідомлень:
-    audioUrl: v.optional(v.string()),
-    audioStorageId: v.optional(v.id("_storage")),
-    audioDuration: v.optional(v.number()), // тривалість у секундах
-  }).index("by_chat_room", ["chatRoomId"]),
+    createdAt: v.number(),
+  })
+    .index("by_chat_room", ["chatRoomId"])
+    .index("by_sender", ["senderId"]),
 
+  // Індикатори набору тексту
   typingIndicators: defineTable({
     chatRoomId: v.id("chatRooms"),
     userId: v.id("users"),
     userName: v.string(),
     lastTypedAt: v.number(),
   })
-    .index("by_room", ["chatRoomId"])
-    .index("by_user_and_room", ["userId", "chatRoomId"]),
+    .index("by_user_and_room", ["userId", "chatRoomId"])
+    .index("by_room", ["chatRoomId"]),
 });

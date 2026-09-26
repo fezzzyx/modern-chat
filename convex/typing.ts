@@ -63,4 +63,5 @@ export const getTypingUsers = query({
       .filter((ind) => ind.userId !== userId)
       .map((ind) => ind.userName);
   },
+
 });
