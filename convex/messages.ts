@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
-
+import { paginationOptsValidator } from "convex/server";
 /**
  * Отримання списку повідомлень у вказаній кімнаті
  * в хронологічному порядку.
@@ -385,6 +385,55 @@ export const generateUploadUrl = mutation({
 /**
  * Відправка відеокружечка.
  */
+
+export const getPaginatedMessages = query({
+  args: {
+    chatRoomId: v.id("chatRooms"),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      return {
+        page: [],
+        isDone: true,
+        continueCursor: "",
+      };
+    }
+
+    const paginated = await ctx.db
+      .query("messages")
+      .withIndex("by_chat_room", (q) => q.eq("chatRoomId", args.chatRoomId))
+      .order("desc")
+      .paginate(args.paginationOpts);
+
+    if (paginated.page.length === 0) {
+      return paginated;
+    }
+
+    const messagesWithSender = await Promise.all(
+      paginated.page.map(async (msg) => {
+        const sender = await ctx.db.get(msg.senderId);
+
+        return {
+          ...msg,
+          sender: {
+            _id: sender?._id,
+            name: sender?.name ?? "Користувач",
+            username: sender?.username,
+            image: sender?.image,
+          },
+        };
+      })
+    );
+
+    return {
+      ...paginated,
+      page: messagesWithSender,
+    };
+  },
+});
+
 export const sendVideoNoteMessage = mutation({
   args: {
     chatRoomId: v.id("chatRooms"),
